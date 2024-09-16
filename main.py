@@ -4,7 +4,7 @@ import moviepy.editor as mp
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
 
 # Пути для видео, аудио и файла с результатами транскрипции
-video_path = "./mnt/data/example.mkv"
+video_path = "./mnt/data/2024-09-11 Иванов SA.mkv"
 audio_path = "./mnt/data/interview_audio.wav"
 transcription_file_path = "./mnt/data/interview_transcription.txt"
 
@@ -77,7 +77,7 @@ def transcribe_with_whisper_in_chunks(audio_path, chunk_length_sec=30):
     # Транскрибируем каждый фрагмент по очереди
     transcription = ""
     for i, chunk in enumerate(chunks):
-        print(f"Транскрибируется фрагмент {i + 1}/{len(chunks)}...")
+        print(f"Транскрибируется фрагмент {i + 1}/{len(chunks)} ...")
         chunk_transcription = transcribe_chunk_with_whisper(chunk, model, processor, sample_rate, device)
         transcription += chunk_transcription + " "
 
