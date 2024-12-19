@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Реальное время транскрибации речи</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<h1>Распознавание речи в реальном времени</h1>
+<div>
+    <button id="mic-on-btn">Включить микрофон</button>
+    <button id="mic-off-btn">Выключить микрофон</button>
+</div>
+<div>
+    <h2>Управление датасетом</h2>
+    <input type="text" id="dataset-link" placeholder="bond005/sberdevices_golos_10h_crowd">
+    <button id="load-dataset-btn">Загрузить датасет</button>
+</div>
+<div>
+    <h2>Переобучение модели</h2>
+    <label>Число эпох: <input type="number" id="epochs" value="1"></label>
+    <label>Learning Rate: <input type="text" id="lr" value="1e-4"></label>
+    <button id="retrain-btn">Переобучить</button>
+    <div id="progress-container" style="display: none;">
+        <h3>Прогресс обучения:</h3>
+        <progress id="progress-bar" value="0" max="100"></progress>
+        <span id="progress-text">0%</span>
+    </div>
+</div>
+<div>
+    <h2>Метрики обучения</h2>
+    <pre id="metrics-output"></pre>
+</div>
+<div>
+    <h2>Транскрибированный текст</h2>
+    <pre id="transcribed-text"></pre>
+</div>
+<script>
+    // static/main.js
+
+    console.log('main.js загружен'); // Логирование загрузки скрипта
+
+    // Обработчики кнопок микрофона
+    document.getElementById('mic-on-btn').addEventListener('click', async () => {
+        if (isRecording) return;
+        if (!navigator.mediaDevices) {
+            alert('Media Devices API не поддерживается вашим браузером.');
+            return;
+        }
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.start();
+            isRecording = true;
+            audioChunks = [];
+
+            mediaRecorder.ondataavailable = event => {
+                console.log('Получены данные аудио:', event.data.size, 'байт');
+                audioChunks.push(event.data);
+            };
+
+            mediaRecorder.onstop = () => {
+                const audioBlob = new Blob(audioChunks, {type: 'audio/webm'}); // Используем 'audio/webm'
+                console.log('Размер Blob аудио:', audioBlob.size, 'байт');
+
+                if (audioBlob.size === 0) {
+                    console.warn('Получен пустой Blob аудио.');
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.readAsDataURL(audioBlob);
+                reader.onloadend = () => {
+                    const base64Audio = reader.result.split(',')[1];
+                    console.log('Тип base64Audio:', typeof base64Audio); // Проверка типа данных
+                    console.log('Первые 50 символов base64Audio:', base64Audio.slice(0, 50)); // Превью данных
+                    console.log('Длина base64Audio:', base64Audio.length, 'символов');
+
+                    if (base64Audio.length < 100) { // Пороговое значение, зависит от длины аудио
+                        console.warn('base64Audio слишком короткий, возможно, данные не записаны корректно.');
+                    }
+
+                    // Отправка аудио данных через WebSocket
+                    transcribeWs.send(base64Audio);
+                    console.log('Аудио данные отправлены на транскрипцию.');
+                };
+            };
+
+            console.log('Микрофон включен и запись начата.');
+        } catch (err) {
+            console.error('Ошибка при доступе к микрофону:', err);
+            alert('Ошибка при доступе к микрофону.');
+        }
+    });
+
+    document.getElementById('mic-off-btn').addEventListener('click', () => {
+        if (!isRecording) return;
+        mediaRecorder.stop();
+        isRecording = false;
+        console.log('Микрофон выключен и запись остановлена.');
+    });
+
+
+    document.getElementById('load-dataset-btn').addEventListener('click', async () => {
+        const link = document.getElementById('dataset-link').value;
+        const resp = await fetch('/api/dataset/load', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({link: link})
+        });
+        const data = await resp.json();
+        alert('Датасет загружен: ' + JSON.stringify(data));
+    });
+
+    document.getElementById('retrain-btn').addEventListener('click', async () => {
+        const epochs = document.getElementById('epochs').value;
+        const lr = document.getElementById('lr').value;
+        const resp = await fetch('/api/model/retrain', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({epochs: parseInt(epochs, 10), lr: parseFloat(lr)})
+        });
+        const data = await resp.json();
+        alert(JSON.stringify(data));
+
+        // Показать прогресс-бар
+        document.getElementById('progress-container').style.display = 'block';
+    });
+
+    let mediaRecorder;
+    let audioChunks = [];
+    let isRecording = false;
+
+    // Подключение к WebSocket для прогресса обучения
+    const trainingWs = new WebSocket(`ws://${window.location.host}/ws/progress`);
+
+    trainingWs.onopen = function () {
+        console.log('WebSocket соединение установлено на /ws/progress.');
+    };
+
+    trainingWs.onerror = function (error) {
+        console.error('WebSocket ошибка на /ws/progress:', error);
+    };
+
+    trainingWs.onclose = function () {
+        console.log('WebSocket соединение закрыто на /ws/progress.');
+    };
+
+    trainingWs.onmessage = function (event) {
+        const message = event.data;
+        console.log('Получено сообщение по WebSocket (training):', message);
+
+        const progressText = document.getElementById('progress-text');
+        const progressBar = document.getElementById('progress-bar');
+        const metricsOutput = document.getElementById('metrics-output'); // Ссылка на элемент
+
+        if (message.includes("Epoch")) {
+            // Обновление прогресса по эпохам
+            const totalEpochs = parseInt(document.getElementById('epochs').value);
+            const currentEpoch = parseInt(message.split(" ")[1].split("/")[0]);
+            const progressPercentage = (currentEpoch / totalEpochs) * 100;
+            progressBar.value = progressPercentage;
+            progressText.textContent = `${progressPercentage}%`;
+        } else if (message.includes("Training completed")) {
+            progressBar.value = 100;
+            progressText.textContent = `100%`;
+            metricsOutput.textContent += "Модель успешно переобучена.\n"; // Обновление метрик с добавлением строки
+            alert("Переобучение завершено!");
+        } else if (message.startsWith("Error")) {
+            alert(message);
+        }
+
+        // Дополнительно: отображать все сообщения в метриках для полной отладки
+        metricsOutput.textContent += message + "\n"; // Добавить все сообщения для проверки
+    };
+
+    // Подключение к WebSocket для транскрибации
+    const transcribeWs = new WebSocket(`ws://${window.location.host}/ws/transcribe`);
+
+    transcribeWs.onopen = function () {
+        console.log('WebSocket соединение установлено на /ws/transcribe.');
+    };
+
+    transcribeWs.onerror = function (error) {
+        console.error('WebSocket ошибка на /ws/transcribe:', error);
+    };
+
+    transcribeWs.onclose = function () {
+        console.log('WebSocket соединение закрыто на /ws/transcribe.');
+    };
+
+    transcribeWs.onmessage = function (event) {
+        const transcription = event.data;
+        console.log('Получено транскрибированное сообщение:', transcription);
+
+        const transcribedText = document.getElementById('transcribed-text');
+        transcribedText.textContent += transcription + "\n";
+    };
+
+
+    // Обновление транскрибированного текста каждые 3 секунды
+    // setInterval(async () => {
+    //     const resp = await fetch('/api/transcribed');
+    //     const text = await resp.text();
+    //     document.getElementById('transcribed-text').textContent = text;
+    // }, 3000);
+
+</script>
+</body>
+</html>
