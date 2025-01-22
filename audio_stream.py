@@ -10,15 +10,15 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Используемое устройство: {device}")
 
 # Инициализация модели и процессора Whisper
-processor = WhisperProcessor.from_pretrained("openai/whisper-large-v2")
-model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large-v2").to(device)
+processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3")
+model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large-v3").to(device)
 
 # Установка параметров записи
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 16000  # Whisper ожидает аудио с частотой дискретизации 16kHz
 CHUNK = 1024  # Размер фрейма для обработки
-BUFFER_DURATION = 2  # Длительность буфера в секундах
+BUFFER_DURATION = 5  # Длительность буфера в секундах
 
 def transcribe_stream():
     # Инициализация PyAudio

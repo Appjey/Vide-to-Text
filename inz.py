@@ -1,8 +1,9 @@
 from transformers import WhisperForConditionalGeneration, WhisperTokenizer
 from datasets import load_dataset
 
+from project.model.process import processor, model
+
 # Загружаем модель и токенайзер
-model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large-v2")
 tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-large-v2")
 
 # Загружаем обучающие данные
@@ -10,8 +11,21 @@ dataset = load_dataset("path_to_your_dataset")  # Укажите путь к с�
 
 # Подготовка данных (например, токенизация)
 def preprocess_function(batch):
-    inputs = tokenizer(batch["audio_text"], return_tensors="pt", padding=True)
-    return inputs
+    inputs = processor.feature_extractor(
+        batch["audio"]["array"],
+        sampling_rate=16000,
+        return_tensors="pt"
+    )
+    labels = processor.tokenizer(
+        batch["text"],
+        return_tensors="pt",
+        truncation=True
+    )
+
+    batch["input_features"] = inputs.input_features[0]
+    batch["labels"] = labels.input_ids[0]
+    return batch
+
 
 tokenized_dataset = dataset.map(preprocess_function)
 
